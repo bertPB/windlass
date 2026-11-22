@@ -23,6 +23,7 @@ Environment=WINDLASS_LOG_LEVEL=debug
 | `WINDLASS_DATA` | Default `/var/lib/windlass`. Platform state: the SQLite database and keys, projects, plugins. |
 | `WINDLASS_PROJECTS` | Default `<data>/projects`. Where project directories live. Point it at an existing stacks directory to adopt what is already there. Local backups go in a `backups` directory beside it. |
 | `WINDLASS_LOG_LEVEL` | Default `info`. One of `debug`, `info`, `warn`, `error`. An unrecognised value is a startup error rather than a silent fallback. |
+| `WINDLASS_IMAGE_UPDATE_INTERVAL` | Default `24h`. How often opted-in projects are checked for newer images. Go duration, at least `1h`; invalid values fail startup. See [Image updates](./deployments.md#image-updates). |
 | `WINDLASS_CADDY_ADMIN` | Default `http://127.0.0.1:2019`. Caddy admin API. Set this when Caddy runs in a container: `http://caddy:2019`. |
 | `WINDLASS_PANEL_UPSTREAM` | Default `127.0.0.1:8080`. The address Caddy dials to reach the panel, used by the Settings-managed panel hostname. Change it when Caddy is not on the host network. |
 | `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Sources whose `X-Forwarded-For`, `X-Real-IP` and `X-Forwarded-Proto` headers Windlass believes when it records a client's address and decides whether the request is HTTPS (HSTS, Secure cookies). The default covers the recommended local Caddy. Widen it only for a proxy you control. |

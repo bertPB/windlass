@@ -117,6 +117,31 @@ running one has finished. See [One deployment at a time](#one-deployment-at-a-ti
 
 Manual is the default. A project only auto-deploys because you asked it to.
 
+## Image updates
+
+Enable **Update images automatically** in a project's Overview to opt in. Windlass
+pulls its images every 24 hours and starts a deployment only when an image differs
+from what a container is running. These deployments appear as **image update**
+(trigger `schedule`); unchanged images create no deployment.
+
+Set `WINDLASS_IMAGE_UPDATE_INTERVAL` to a Go duration such as `12h` to change the
+interval for all opted-in projects. The default is `24h` and the minimum is `1h`.
+Checks start five minutes after startup and run on the deployment queue, so a check never
+overlaps a deployment. Check times are kept only in memory. A pull failure is logged and
+the project is tried again at the next interval.
+
+A check is skipped, and nothing is pulled, when the project has never deployed, when its
+newest deployment is running or did not succeed, or when what is live is a rollback or a
+promotion: an update would otherwise replace code or images someone chose. A Git project is
+deployed at the commit that is already live, so an update brings newer images and never
+commits pushed since; one whose live deployment recorded no commit is skipped. Services
+built on the server do not trigger an update, and their base images are not refreshed. An
+update of a staging project is not promoted to live.
+
+Pulling moves the tag on the server, so another project using the same image tag that is
+not opted in shows image drift until its next deploy. The per-project setting lives as
+`auto_update_images` in `.windlass.json`, not in SQLite.
+
 ## Private registries
 
 Images from private registries need credentials, which an admin adds under **Settings,

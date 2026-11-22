@@ -83,6 +83,10 @@ type payload struct {
 	// NoPromote keeps a new staging's first deployment from promoting
 	// itself: nobody has looked at it yet.
 	NoPromote bool `json:"no_promote,omitempty"`
+	// Commit pins the deployment to a Git commit before its job is queued.
+	// A scheduled image update uses the commit already live, so it changes
+	// images and nothing else.
+	Commit string `json:"commit,omitempty"`
 }
 
 // pinned reports whether d runs digests and a commit chosen when it was
@@ -120,6 +124,7 @@ func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Serv
 	s := &Service{q: q, agent: ag, projects: proj, git: gitSvc, registry: reg, runner: runner, bus: bus, logger: logger,
 		waiting: map[string]*Waiting{}}
 	runner.Register(JobType, s.runJob)
+	runner.Register(imageUpdateJob, s.runImageUpdateJob)
 	return s
 }
 
@@ -160,6 +165,13 @@ func (s *Service) deploy(ctx context.Context, projectName, trigger string, pl pa
 	})
 	if err != nil {
 		return db.Deployment{}, err
+	}
+	if pl.Commit != "" {
+		if err := s.q.SetDeploymentCommit(ctx, db.SetDeploymentCommitParams{
+			GitCommit: sql.NullString{String: pl.Commit, Valid: true}, ID: d.ID,
+		}); err != nil {
+			return db.Deployment{}, s.abandon(ctx, d, err)
+		}
 	}
 
 	pl.DeploymentID, pl.Project = d.ID, projectName

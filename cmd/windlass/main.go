@@ -140,6 +140,7 @@ func run() error {
 
 	backupSvc := backups.New(queries, ag, projectSvc, box, bus, logger)
 	go backupSvc.RunScheduler(ctx)
+	go deploySvc.RunImageUpdates(ctx, cfg.ImageUpdateInterval)
 
 	update.Repo = cfg.UpdateRepo
 	update.Token = cfg.UpdateToken

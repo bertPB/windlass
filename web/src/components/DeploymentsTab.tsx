@@ -92,7 +92,7 @@ export default function DeploymentsTab({ project }: { project: string }) {
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 pl-5 text-xs text-fg3">
                   <span className="truncate">
-                    {d.promoted_from_number ? `promoted from #${d.promoted_from_number}` : d.triggered_by}
+                    {d.promoted_from_number ? `promoted from #${d.promoted_from_number}` : d.triggered_by === "schedule" ? "image update" : d.triggered_by}
                   </span>
                   {d.git_commit && <span className="font-mono">· {d.git_commit.slice(0, 7)}</span>}
                   <Duration d={d} className="ml-auto" />
@@ -211,7 +211,7 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg3">
             <span className="inline-flex items-center gap-1.5">
-              <Icon name="user" size={13} /> {d.triggered_by}
+              <Icon name="user" size={13} /> {d.triggered_by === "schedule" ? "image update" : d.triggered_by}
             </span>
             {d.promoted_from_number && p?.staging && (
               <Link

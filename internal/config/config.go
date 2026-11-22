@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Config struct {
@@ -33,7 +34,8 @@ type Config struct {
 	UpdateToken string
 	// TrustedProxies is a comma-separated list of IPs/CIDRs allowed to supply
 	// forwarding headers. Loopback covers the recommended local Caddy setup.
-	TrustedProxies string
+	TrustedProxies      string
+	ImageUpdateInterval time.Duration
 }
 
 // Load reads the configuration from the environment. It then removes
@@ -63,6 +65,13 @@ func Load() (Config, error) {
 	case "", "info":
 	default:
 		return cfg, fmt.Errorf("invalid WINDLASS_LOG_LEVEL %q", os.Getenv("WINDLASS_LOG_LEVEL"))
+	}
+
+	interval := envOr("WINDLASS_IMAGE_UPDATE_INTERVAL", "24h")
+	var err error
+	cfg.ImageUpdateInterval, err = time.ParseDuration(interval)
+	if err != nil || cfg.ImageUpdateInterval < time.Hour {
+		return cfg, fmt.Errorf("invalid WINDLASS_IMAGE_UPDATE_INTERVAL %q: must be a duration of at least 1h", interval)
 	}
 
 	cfg.ProjectsDir = envOr("WINDLASS_PROJECTS", filepath.Join(cfg.DataDir, "projects"))

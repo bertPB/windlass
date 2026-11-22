@@ -40,12 +40,13 @@ const manifestFile = ".windlass.json"
 // Manifest is application configuration that is not part of the Compose
 // specification. It lives beside compose.yaml so SQLite can be rebuilt.
 type Manifest struct {
-	Version    int            `json:"version"`
-	Source     string         `json:"source"`
-	GitRepo    string         `json:"git_repo,omitempty"`
-	GitBranch  string         `json:"git_branch,omitempty"`
-	AutoDeploy bool           `json:"auto_deploy"`
-	Domains    []DomainConfig `json:"domains"`
+	Version          int            `json:"version"`
+	Source           string         `json:"source"`
+	GitRepo          string         `json:"git_repo,omitempty"`
+	GitBranch        string         `json:"git_branch,omitempty"`
+	AutoDeploy       bool           `json:"auto_deploy"`
+	AutoUpdateImages bool           `json:"auto_update_images,omitempty"`
+	Domains          []DomainConfig `json:"domains"`
 	// Staging is set only on a staging project, naming the live one.
 	Staging *StagingConfig `json:"staging,omitempty"`
 }
@@ -350,6 +351,20 @@ func (s *Service) SetGitMetadata(ctx context.Context, project, repo, branch stri
 	}
 	manifest.Source, manifest.GitRepo, manifest.GitBranch = "git", repo, branch
 	manifest.AutoDeploy = autoDeploy
+	return s.writeManifest(ctx, project, manifest)
+}
+
+func (s *Service) AutoUpdateImages(ctx context.Context, project string) (bool, error) {
+	manifest, err := s.readManifest(ctx, project)
+	return manifest.AutoUpdateImages, err
+}
+
+func (s *Service) SetAutoUpdateImages(ctx context.Context, project string, enabled bool) error {
+	manifest, err := s.readManifest(ctx, project)
+	if err != nil {
+		return err
+	}
+	manifest.AutoUpdateImages = enabled
 	return s.writeManifest(ctx, project, manifest)
 }
 

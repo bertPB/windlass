@@ -1,4 +1,8 @@
 import { useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { Switch } from "../ui/Field";
+import { FormError } from "../ui/Page";
 import { useCan } from "../api/auth";
 import { Link } from "react-router";
 import { useProject, useProjectDrift } from "../api/projects";
@@ -169,6 +173,7 @@ export default function OverviewTab({ project }: { project: string }) {
             }
           />
         </Card>
+        <ImageUpdateSettings project={project} />
       </div>
 
       <div className="min-w-0 space-y-4">
@@ -178,6 +183,34 @@ export default function OverviewTab({ project }: { project: string }) {
         <StagingOffer project={project} />
       </div>
     </div>
+  );
+}
+
+function ImageUpdateSettings({ project }: { project: string }) {
+  const can = useCan();
+  const qc = useQueryClient();
+  const key = ["image-updates", project];
+  const path = `/projects/${project}/image-updates`;
+  const settings = useQuery({ queryKey: key, queryFn: () => api<{ enabled: boolean }>(path) });
+  const save = useMutation({
+    mutationFn: (enabled: boolean) => api<{ enabled: boolean }>(path, { method: "PUT", body: JSON.stringify({ enabled }) }),
+    onSuccess: (data) => qc.setQueryData(key, data),
+  });
+  return (
+    <Card>
+      <CardHeader title="Image updates" />
+      <div className="space-y-3 px-5 py-4">
+        <Switch
+          checked={settings.data?.enabled ?? false}
+          onChange={(enabled) => save.mutate(enabled)}
+          disabled={!can("member") || !settings.data || save.isPending}
+          label="Update images automatically"
+          description="Checks periodically for newer images and deploys only when one has changed. Services built here do not trigger an update."
+        />
+        <FormError error={settings.error} fallback="Could not load image update settings" />
+        <FormError error={save.error} fallback="Could not save image update settings" />
+      </div>
+    </Card>
   );
 }
 
@@ -222,7 +255,7 @@ function LatestDeployment({ project }: { project: string }) {
       <dl className="mt-4 space-y-1.5 text-sm">
         <div className="flex justify-between gap-3">
           <dt className="text-fg3">Triggered by</dt>
-          <dd className="truncate text-fg2">{d.promoted_from_number ? `promoted from staging #${d.promoted_from_number}` : d.triggered_by}</dd>
+          <dd className="truncate text-fg2">{d.promoted_from_number ? `promoted from staging #${d.promoted_from_number}` : d.triggered_by === "schedule" ? "image update" : d.triggered_by}</dd>
         </div>
         {d.git_commit && (
           <div className="flex justify-between gap-3">
