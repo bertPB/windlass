@@ -186,32 +186,84 @@ export default function OverviewTab({ project }: { project: string }) {
   );
 }
 
+type ImageCheck = { at: string; result: "queued" | "no_change" | "deployed" | "skipped" | "failed"; detail?: string; deployment?: number };
+type ImageUpdates = { enabled: boolean; last_check?: ImageCheck };
+
 function ImageUpdateSettings({ project }: { project: string }) {
   const can = useCan();
   const qc = useQueryClient();
   const key = ["image-updates", project];
   const path = `/projects/${project}/image-updates`;
-  const settings = useQuery({ queryKey: key, queryFn: () => api<{ enabled: boolean }>(path) });
+  const settings = useQuery({
+    queryKey: key,
+    queryFn: () => api<ImageUpdates>(path),
+    // A queued check runs behind any deployment, so follow it until it reports.
+    refetchInterval: (q) => (q.state.data?.last_check?.result === "queued" ? 3000 : false),
+  });
   const save = useMutation({
-    mutationFn: (enabled: boolean) => api<{ enabled: boolean }>(path, { method: "PUT", body: JSON.stringify({ enabled }) }),
+    mutationFn: (enabled: boolean) => api<ImageUpdates>(path, { method: "PUT", body: JSON.stringify({ enabled }) }),
     onSuccess: (data) => qc.setQueryData(key, data),
   });
+  const check = useMutation({
+    mutationFn: () => api<ImageUpdates>(`${path}/check`, { method: "POST" }),
+    onSuccess: (data) => qc.setQueryData(key, data),
+  });
+  const enabled = settings.data?.enabled ?? false;
+  const last = settings.data?.last_check;
   return (
     <Card>
       <CardHeader title="Image updates" />
       <div className="space-y-3 px-5 py-4">
         <Switch
-          checked={settings.data?.enabled ?? false}
-          onChange={(enabled) => save.mutate(enabled)}
+          checked={enabled}
+          onChange={(on) => save.mutate(on)}
           disabled={!can("member") || !settings.data || save.isPending}
           label="Update images automatically"
           description="Checks periodically for newer images and deploys only when one has changed. Services built here do not trigger an update."
         />
+        {enabled && (
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 text-sm text-fg2">
+              <LastImageCheck project={project} check={last} />
+            </p>
+            {can("member") && (
+              <Button size="sm" icon="refresh" loading={check.isPending || last?.result === "queued"} onClick={() => check.mutate()}>
+                Check now
+              </Button>
+            )}
+          </div>
+        )}
         <FormError error={settings.error} fallback="Could not load image update settings" />
         <FormError error={save.error} fallback="Could not save image update settings" />
+        <FormError error={check.error} fallback="Could not start the check" />
       </div>
     </Card>
   );
+}
+
+function LastImageCheck({ project, check }: { project: string; check?: ImageCheck }) {
+  if (!check) return <>Not checked since Windlass started.</>;
+  const when = timeAgo(check.at);
+  switch (check.result) {
+    case "queued":
+      return <>Check queued…</>;
+    case "no_change":
+      return <>Checked {when}: images are up to date.</>;
+    case "deployed":
+      return (
+        <>
+          Checked {when}: newer images found,{" "}
+          <Link to={`/projects/${project}/deployments?d=${check.deployment}`} className="text-accent hover:underline">
+            deployment #{check.deployment}
+          </Link>
+          .
+        </>
+      );
+    case "skipped":
+      return <>Checked {when}: skipped, {check.detail}.</>;
+    case "failed":
+      return <span className="text-err">Checked {when}: failed, {check.detail}</span>;
+  }
 }
 
 function SideCard({ title, link, className, children }: { title: string; link?: { to: string; label: string }; className?: string; children: ReactNode }) {

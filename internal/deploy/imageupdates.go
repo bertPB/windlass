@@ -18,6 +18,64 @@ type imageUpdatePayload struct {
 	Project string `json:"project"`
 }
 
+// ImageCheck is the outcome of a project's latest image check. Result is
+// queued, no_change, deployed, skipped or failed. Outcomes are kept in
+// memory only: they say what happened since Windlass started, and a
+// deployment an update started is in the project's history either way.
+type ImageCheck struct {
+	At         time.Time `json:"at"`
+	Result     string    `json:"result"`
+	Detail     string    `json:"detail,omitempty"`
+	Deployment int64     `json:"deployment,omitempty"`
+}
+
+// ErrImageUpdatesOff refuses a manual check of a project that has not
+// opted in, since the check itself would skip it.
+var ErrImageUpdatesOff = errors.New("automatic image updates are off for this project")
+
+// LastImageCheck returns the project's latest image check, if there has
+// been one since Windlass started.
+func (s *Service) LastImageCheck(project string) (ImageCheck, bool) {
+	s.checksMu.Lock()
+	defer s.checksMu.Unlock()
+	c, ok := s.checks[project]
+	return c, ok
+}
+
+func (s *Service) recordImageCheck(project string, c ImageCheck) {
+	c.At = time.Now().UTC()
+	s.checksMu.Lock()
+	defer s.checksMu.Unlock()
+	if s.checks == nil {
+		s.checks = map[string]ImageCheck{}
+	}
+	s.checks[project] = c
+}
+
+// CheckImagesNow queues an image check for project ahead of its schedule.
+// A check already queued is not queued twice.
+func (s *Service) CheckImagesNow(ctx context.Context, project string) error {
+	enabled, err := s.projects.AutoUpdateImages(ctx, project)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrImageUpdatesOff
+	}
+	return s.queueImageCheck(ctx, project)
+}
+
+func (s *Service) queueImageCheck(ctx context.Context, project string) error {
+	if c, ok := s.LastImageCheck(project); ok && c.Result == "queued" {
+		return nil
+	}
+	if _, err := s.runner.Enqueue(ctx, imageUpdateJob, imageUpdatePayload{Project: project}); err != nil {
+		return err
+	}
+	s.recordImageCheck(project, ImageCheck{Result: "queued"})
+	return nil
+}
+
 // RunImageUpdates queues an image check for each opted-in project once per
 // interval until ctx ends.
 func (s *Service) RunImageUpdates(ctx context.Context, interval time.Duration) {
@@ -65,7 +123,7 @@ func (s *Service) imageUpdatesTick(ctx context.Context, interval time.Duration, 
 			continue
 		}
 		last[p.Name] = time.Now()
-		if _, err := s.runner.Enqueue(ctx, imageUpdateJob, imageUpdatePayload{Project: p.Name}); err != nil {
+		if err := s.queueImageCheck(ctx, p.Name); err != nil {
 			s.logger.Warn("queue image update check", "project", p.Name, "error", err)
 		}
 	}
@@ -78,49 +136,57 @@ func (s *Service) runImageUpdateJob(ctx context.Context, raw json.RawMessage, _ 
 	}
 	// A failed check waits for the next interval rather than the runner's
 	// retries: the usual cause, an unreachable registry, will not have cleared.
-	if err := s.checkImageUpdates(ctx, pl.Project); err != nil {
+	c, err := s.checkImageUpdates(ctx, pl.Project)
+	if err != nil {
 		s.logger.Warn("check image updates", "project", pl.Project, "error", err)
+		c = ImageCheck{Result: "failed", Detail: err.Error()}
+	} else if c.Result == "skipped" {
+		s.logger.Info("image update skipped", "project", pl.Project, "reason", c.Detail)
 	}
+	s.recordImageCheck(pl.Project, c)
 	return nil
 }
 
-func (s *Service) checkImageUpdates(ctx context.Context, project string) error {
+func skipped(reason string) ImageCheck { return ImageCheck{Result: "skipped", Detail: reason} }
+
+func (s *Service) checkImageUpdates(ctx context.Context, project string) (ImageCheck, error) {
 	p, err := s.projects.Get(ctx, project)
 	if err != nil {
-		return err
+		return ImageCheck{}, err
 	}
 	// Read again here: the job may have waited behind deployments, or a
 	// restart, after the setting was turned off.
-	if enabled, err := s.projects.AutoUpdateImages(ctx, project); err != nil || !enabled {
-		return err
+	enabled, err := s.projects.AutoUpdateImages(ctx, project)
+	if err != nil {
+		return ImageCheck{}, err
+	}
+	if !enabled {
+		return skipped("automatic image updates were turned off"), nil
 	}
 	last, err := s.q.LatestSucceededDeployment(ctx, p.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return skipped("the project has not deployed successfully yet"), nil
 	}
 	if err != nil {
-		return err
+		return ImageCheck{}, err
 	}
 	// Only a project whose newest deployment succeeded is known to run what
 	// that deployment recorded. After a failed one, which may have started
 	// some services, an update would put back the older code.
 	latest, err := s.q.LatestDeploymentID(ctx, p.ID)
 	if err != nil {
-		return err
+		return ImageCheck{}, err
 	}
 	if latest != last.ID {
-		s.logger.Info("image update skipped: the latest deployment did not succeed", "project", project)
-		return nil
+		return skipped("the latest deployment is running or did not succeed"), nil
 	}
 	if pinned(last) {
-		s.logger.Info("image update skipped for pinned deployment", "project", project)
-		return nil
+		return skipped("a rollback or promotion is live; deploy to resume updates"), nil
 	}
 	// Without the commit that is live, sync would check out the branch head
 	// and ship whatever was pushed since.
 	if p.Source == "git" && p.GitRepo.Valid && !last.GitCommit.Valid {
-		s.logger.Info("image update skipped: no Git commit recorded for the live deployment", "project", project)
-		return nil
+		return skipped("the live deployment recorded no Git commit; deploy once to resume updates"), nil
 	}
 	if s.registry != nil {
 		if err := s.registry.Apply(ctx, s.agent.Docker()); err != nil {
@@ -128,15 +194,15 @@ func (s *Service) checkImageUpdates(ctx context.Context, project string) error {
 		}
 	}
 	if err := s.agent.Compose().Pull(ctx, project, nil); err != nil {
-		return err
+		return ImageCheck{}, err
 	}
 	drift, err := s.Drift(ctx, project)
 	if err != nil {
-		return err
+		return ImageCheck{}, err
 	}
 	cfg, err := s.agent.Compose().Config(ctx, project)
 	if err != nil {
-		return err
+		return ImageCheck{}, err
 	}
 	// A built service's image only changes when it is built, so a tag it
 	// shares with a pulled image is not news here.
@@ -148,15 +214,18 @@ func (s *Service) checkImageUpdates(ctx context.Context, project string) error {
 		}
 	}
 	if !changed {
-		return nil
+		return ImageCheck{Result: "no_change"}, nil
 	}
 	s.queueMu.Lock()
 	defer s.queueMu.Unlock()
 	// NoPromote: a scheduled update of staging must not replace what live
 	// runs, which may be a rollback someone chose.
-	_, err = s.deploy(ctx, project, "schedule", payload{Project: project, Commit: last.GitCommit.String, NoPromote: true})
+	d, err := s.deploy(ctx, project, "schedule", payload{Project: project, Commit: last.GitCommit.String, NoPromote: true})
 	if errors.Is(err, ErrDeployInProgress) {
-		return nil
+		return skipped("a deployment started during the check"), nil
 	}
-	return err
+	if err != nil {
+		return ImageCheck{}, err
+	}
+	return ImageCheck{Result: "deployed", Deployment: d.Number}, nil
 }

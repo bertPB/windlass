@@ -114,6 +114,9 @@ type Service struct {
 	// the run it waits for.
 	queueMu sync.Mutex
 	waiting map[string]*Waiting
+
+	checksMu sync.Mutex
+	checks   map[string]ImageCheck
 }
 
 // OnSucceeded sets a hook told of each successful deployment, after any

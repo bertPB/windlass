@@ -127,8 +127,16 @@ from what a container is running. These deployments appear as **image update**
 Set `WINDLASS_IMAGE_UPDATE_INTERVAL` to a Go duration such as `12h` to change the
 interval for all opted-in projects. The default is `24h` and the minimum is `1h`.
 Checks start five minutes after startup and run on the deployment queue, so a check never
-overlaps a deployment. Check times are kept only in memory. A pull failure is logged and
-the project is tried again at the next interval.
+overlaps a deployment. A pull failure is logged and the project is tried again at the next
+interval.
+
+Under the switch, the Overview shows the latest check: when it ran and whether images were
+up to date, an update was deployed (with a link to that deployment), the check was skipped
+and why, or it failed and with what error. **Check now** queues a check straight away
+(`POST /api/v1/projects/{name}/image-updates/check`, member role). Check times and results
+are kept in memory only, so after a restart the line reads "Not checked since Windlass
+started" until the next check; deployments an update started stay in the history as
+**image update**.
 
 A check is skipped, and nothing is pulled, when the project has never deployed, when its
 newest deployment is running or did not succeed, or when what is live is a rollback or a

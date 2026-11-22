@@ -74,6 +74,7 @@ func (a *API) projectRoutes(r chi.Router) {
 		r.Put("/{name}/env", a.handleSetProjectEnv)
 		r.Put("/{name}/git", a.handleConfigureProjectGit)
 		r.Put("/{name}/image-updates", a.handleSetImageUpdates)
+		r.Post("/{name}/image-updates/check", a.handleCheckImageUpdates)
 		r.Post("/{name}/staging/preflight", a.handleStagingPreflight)
 		r.Post("/{name}/staging", a.handleCreateStaging)
 		r.With(auth.RejectToken).Post("/{name}/staging/recreate", a.limitAuth(a.handleRecreateStaging))

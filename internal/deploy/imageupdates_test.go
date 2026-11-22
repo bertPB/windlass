@@ -81,8 +81,16 @@ func TestImageUpdateCheck(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := e.deploy.checkImageUpdates(ctx, "app"); err != nil {
+			check, err := e.deploy.checkImageUpdates(ctx, "app")
+			if err != nil {
 				t.Fatal(err)
+			}
+			want := map[string]string{"changed": "deployed", "unchanged": "no_change", "built": "no_change"}[scenario]
+			if want == "" {
+				want = "skipped"
+			}
+			if check.Result != want || (want == "skipped") != (check.Detail != "") {
+				t.Fatalf("check = %+v, want result %s", check, want)
 			}
 
 			after, err := e.q.LatestDeploymentID(ctx, e.project.ID)
@@ -148,7 +156,7 @@ func TestImageUpdatePinsLiveCommit(t *testing.T) {
 		e.agent.ImageIDs["nginx:alpine"] = "new"
 		e.agent.Statuses["site"] = []agent.ServiceStatus{{Service: "web", Name: "site-web-1", State: "running"}}
 
-		if err := e.deploy.checkImageUpdates(ctx, "site"); err != nil {
+		if _, err := e.deploy.checkImageUpdates(ctx, "site"); err != nil {
 			t.Fatal(err)
 		}
 		latest, err := e.q.LatestDeploymentID(ctx, p.ID)
@@ -183,6 +191,17 @@ func TestImageUpdateTick(t *testing.T) {
 	last := map[string]time.Time{}
 	e.deploy.imageUpdatesTick(ctx, time.Hour, last)
 	e.deploy.imageUpdatesTick(ctx, time.Hour, last)
+	// Check now while the scheduled check is still queued adds nothing, and
+	// a project that has not opted in is refused.
+	if err := e.deploy.CheckImagesNow(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.deploy.CheckImagesNow(ctx, "other"); !errors.Is(err, ErrImageUpdatesOff) {
+		t.Fatalf("check other = %v, want ErrImageUpdatesOff", err)
+	}
+	if c, ok := e.deploy.LastImageCheck("app"); !ok || c.Result != "queued" {
+		t.Fatalf("last check = %+v, %v", c, ok)
+	}
 
 	var types []string
 	rows, err := e.sqlDB.Query("SELECT type, payload FROM jobs ORDER BY id")
@@ -199,5 +218,12 @@ func TestImageUpdateTick(t *testing.T) {
 	}
 	if want := []string{imageUpdateJob + ` {"project":"app"}`}; !slices.Equal(types, want) {
 		t.Fatalf("jobs = %q, want %q", types, want)
+	}
+	// The job records its outcome, which a later check now may queue again.
+	if err := e.deploy.runImageUpdateJob(ctx, []byte(`{"project":"app"}`), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := e.deploy.LastImageCheck("app"); c.Result != "skipped" || c.Detail == "" {
+		t.Fatalf("last check after job = %+v", c)
 	}
 }

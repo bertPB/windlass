@@ -28,6 +28,20 @@ components:
       scheme: bearer
       description: Personal API token, `wl_pat_` followed by 60 hex characters.
   schemas:
+    ImageUpdates:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        last_check:
+          description: The latest image check since Windlass started; absent before the first.
+          type: object
+          required: [at, result]
+          properties:
+            at: { type: string, format: date-time }
+            result: { type: string, enum: [queued, no_change, deployed, skipped, failed] }
+            detail: { type: string, description: Why it was skipped or how it failed }
+            deployment: { type: integer, description: Number of the deployment it started }
     JSONRPCRequest:
       type: object
       required: [jsonrpc, method]
@@ -1089,11 +1103,7 @@ paths:
           description: Automatic image update setting
           content:
             application/json:
-              schema:
-                type: object
-                required: [enabled]
-                properties:
-                  enabled: { type: boolean }
+              schema: { $ref: "#/components/schemas/ImageUpdates" }
         "404": { description: Project not found }
     put:
       summary: Set automatic image updates (member)
@@ -1114,14 +1124,25 @@ paths:
           description: Saved automatic image update setting
           content:
             application/json:
-              schema:
-                type: object
-                required: [enabled]
-                properties:
-                  enabled: { type: boolean }
+              schema: { $ref: "#/components/schemas/ImageUpdates" }
         "400": { description: Invalid body }
         "403": { description: Member role required }
         "404": { description: Project not found }
+
+  /projects/{name}/image-updates/check:
+    post:
+      summary: Queue an image check now (member)
+      operationId: checkProjectImageUpdates
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "202":
+          description: Check queued; last_check.result is queued until it runs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImageUpdates" }
+        "403": { description: Member role required }
+        "404": { description: Project not found }
+        "409": { description: Automatic image updates are off for this project }
 
   /projects/{name}/services:
     get:

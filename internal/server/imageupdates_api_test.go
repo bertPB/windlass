@@ -53,4 +53,21 @@ func TestImageUpdatesAPI(t *testing.T) {
 	if rec := e.do(t, http.MethodGet, "/api/v1/projects/missing/image-updates", nil, cookie); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing get = %d", rec.Code)
 	}
+	// Check now: refused while off, queued once on, member only.
+	const check = "/api/v1/projects/app/image-updates/check"
+	if rec := e.do(t, http.MethodPost, check, nil, cookie); rec.Code != http.StatusConflict {
+		t.Fatalf("check while off = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(t, http.MethodPut, path, map[string]bool{"enabled": true}, cookie); rec.Code != http.StatusOK {
+		t.Fatalf("enable = %d", rec.Code)
+	}
+	if rec := e.do(t, http.MethodPost, check, nil, cookie); rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"result":"queued"`) {
+		t.Fatalf("check = %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := e.sqlDB.Exec("UPDATE users SET role = 'viewer' WHERE email = 'viewer@example.com'"); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do(t, http.MethodPost, check, nil, viewer); rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer check = %d", rec.Code)
+	}
 }
