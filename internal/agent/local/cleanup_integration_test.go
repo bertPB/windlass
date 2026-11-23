@@ -20,9 +20,9 @@ import (
 // more tags with nothing running it, then removes it and trims the build
 // cache. (A rebuild through the docker driver on the containerd image store
 // drops the old image rather than leave it untagged, so the test cannot rely
-// on an untagged one.) Behind the installer's socket
-// proxy the build runs in a buildx_buildkit_default container, and the
-// cache has to be found and trimmed there.
+// on an untagged one.) Behind a socket proxy that refuses /grpc the build
+// runs in a buildx_buildkit_default container, and the cache has to be found
+// and trimmed there.
 //
 // It must not touch images other tests use on a shared daemon. Its images
 // are built with SOURCE_DATE_EPOCH=0, so they read as created in 1970, the
@@ -125,10 +125,10 @@ func TestCleanupRealDocker(t *testing.T) {
 	}
 
 	// Other packages build on the same daemon while this test runs, so
-	// daemon-wide totals can grow during the trim. Behind the installer's
-	// proxy the cache lives in a running buildx container's state volume,
-	// which only the total counts, so that part is the total less the
-	// daemon builder's records.
+	// daemon-wide totals can grow during the trim. Behind a proxy that
+	// refuses /grpc the cache lives in a running buildx container's state
+	// volume, which only the total counts, so that part is the total less
+	// the daemon builder's records.
 	proxied := runningBuilder(ctx, t)
 	recordsBefore := cacheRecords(ctx, t, l)
 	cache, err := l.Docker().PruneBuildCache(ctx, 0)
@@ -211,7 +211,7 @@ func sumSizes(records map[string]int64) int64 {
 }
 
 // runningBuilder reports whether a buildx docker-container builder is up,
-// which is where builds go behind the installer's socket proxy.
+// which is where builds go behind a socket proxy that refuses /grpc.
 func runningBuilder(ctx context.Context, t *testing.T) bool {
 	t.Helper()
 	out, err := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", "name=^"+builderPrefix).Output()

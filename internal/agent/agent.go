@@ -257,10 +257,10 @@ type DockerAgent interface {
 	PruneImages(ctx context.Context, req ImagePruneReq) (ImagePruneResult, error)
 	// PruneBuildCache trims unused build cache until at most keepBytes is
 	// left, in Docker's own builder and in the builder Compose builds with.
-	// Behind the installer's socket proxy that is a buildx_buildkit_default
-	// container: the proxy refuses Docker's /grpc endpoint, so buildx falls
-	// back to running BuildKit in a container, out of reach of Docker's own
-	// build prune.
+	// Behind the installer's socket proxy builds use Docker's own builder.
+	// A proxy that refuses Docker's /grpc endpoint, such as the one installs
+	// used before, makes buildx fall back to a buildx_buildkit_default
+	// container instead, out of reach of Docker's own build prune.
 	PruneBuildCache(ctx context.Context, keepBytes int64) (BuildCachePruneResult, error)
 	// Events streams Docker daemon events (health, restarts) until ctx ends.
 	Events(ctx context.Context, out func(DockerEvent)) error
