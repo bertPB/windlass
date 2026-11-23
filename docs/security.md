@@ -36,10 +36,12 @@ binary. That binary still runs as `windlass`, not root.
 
 The `windlass` user is not in the `docker` group, and the installer removes it if it finds it
 there. The panel reaches Docker through
-[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) on
-`127.0.0.1:2375`, which allows the API families Compose needs (containers, images, volumes,
-networks, builds, exec, events, system and version) and refuses the rest, such as Swarm,
-services, secrets and plugins.
+[socket-proxy](https://github.com/wollomatic/socket-proxy) on `127.0.0.1:2375`, which allows
+the API families Compose needs (containers, images, volumes, networks, builds, exec, events,
+system and version) and refuses the rest, such as Swarm, services, secrets and plugins. It
+also allows `/grpc` and `/session`, so builds run in Docker's own BuildKit. Those reach
+Docker's build service directly, which is no more than the access described below already
+amounts to.
 
 That narrows what the panel can ask Docker for. It does not make Docker access safe: creating
 a container is allowed, and a privileged container with the host's filesystem mounted is root

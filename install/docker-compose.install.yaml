@@ -11,25 +11,20 @@
 #   want to hand-edit compose files from the host.
 services:
   docker-proxy:
-    image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
+    # See the proxy unit in install.sh for why this proxy and these paths.
+    image: ghcr.io/wollomatic/socket-proxy:1.14.0
     restart: unless-stopped
+    user: "0:0"
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    environment:
-      POST: 1
-      BUILD: 1
-      CONTAINERS: 1
-      ALLOW_START: 1
-      ALLOW_STOP: 1
-      ALLOW_RESTARTS: 1
-      EVENTS: 1
-      EXEC: 1
-      IMAGES: 1
-      INFO: 1
-      NETWORKS: 1
-      SYSTEM: 1
-      VOLUMES: 1
-      VERSION: 1
+    command:
+      - -listenip=0.0.0.0
+      - -allowfrom=windlass
+      - -allowHEAD=/(v[0-9.]+/)?(_ping|version|info|events|system|build|grpc|session|containers|exec|images|networks|volumes)(/.*)?
+      - -allowGET=/(v[0-9.]+/)?(_ping|version|info|events|system|build|grpc|session|containers|exec|images|networks|volumes)(/.*)?
+      - -allowPOST=/(v[0-9.]+/)?(_ping|version|info|events|system|build|grpc|session|containers|exec|images|networks|volumes)(/.*)?
+      - -allowPUT=/(v[0-9.]+/)?(_ping|version|info|events|system|build|grpc|session|containers|exec|images|networks|volumes)(/.*)?
+      - -allowDELETE=/(v[0-9.]+/)?(_ping|version|info|events|system|build|grpc|session|containers|exec|images|networks|volumes)(/.*)?
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [control]

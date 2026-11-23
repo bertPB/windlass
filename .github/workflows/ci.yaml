@@ -208,6 +208,18 @@ jobs:
           curl -fsS http://localhost:8080/api/v1/system/health | grep -q '"status":"ok"'
           curl -fsS http://localhost:8080/api/v1/auth/status | grep -q '"needs_setup":true'
           sudo journalctl -u windlass | grep -q setup_token
+      - name: Builds through the proxy use Docker's own BuildKit
+        # bash by name runs with pipefail, so a failed build fails the step through tee.
+        shell: bash
+        run: |
+          # A BuildKit container instead would end with "sending tarball".
+          mkdir -p /tmp/proxybuild
+          printf 'FROM busybox\nRUN echo ok > /ok\n' > /tmp/proxybuild/Dockerfile
+          DOCKER_HOST=tcp://127.0.0.1:2375 docker buildx build --progress=plain -t proxybuild /tmp/proxybuild 2>&1 | tee /tmp/proxybuild.log
+          grep -q 'exporting to image' /tmp/proxybuild.log
+          # Not "! grep": errexit ignores a negated command that is not last.
+          if grep -q 'sending tarball' /tmp/proxybuild.log; then exit 1; fi
+          docker image inspect proxybuild >/dev/null
       - name: Apps survive panel death (principle 7)
         run: |
           docker run -d --name survivor nginx:alpine

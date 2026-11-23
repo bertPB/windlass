@@ -2,6 +2,33 @@
 
 What to check when you move to a new version. A version not listed here needs nothing.
 
+## Unreleased
+
+The Docker socket proxy is now [socket-proxy](https://github.com/wollomatic/socket-proxy),
+which also allows Docker's `/grpc` and `/session` endpoints. With them, `compose build` runs in
+Docker's own BuildKit and writes the image straight into Docker. Before, builds ran in a
+`buildx_buildkit_default` container that sent every image to Docker as a tarball, which on a
+large image took minutes even when every layer was cached.
+
+Self-update does not change the proxy. Rerun the installer to get it:
+
+```sh
+curl -fsSL https://get.windlass.run | sudo sh
+```
+
+The rerun pulls the new proxy image first, then restarts the proxy and the panel. Deployed
+apps keep running. In the container install, take the new `docker-proxy` service from
+`docker-compose.install.yaml`, then `docker compose -f docker-compose.install.yaml up -d`.
+
+Windlass builds no longer use the `buildx_buildkit_default` container, which still holds its
+build cache. Once a deploy shows `exporting to image` rather than `sending tarball`, and
+nothing else on the server builds through a proxy that refuses `/grpc`, you can remove it:
+
+```sh
+docker rm -f buildx_buildkit_default
+docker volume rm buildx_buildkit_default_state
+```
+
 ## v0.62
 
 Docker storage clean-up is on by default. After the first successful deployment on v0.62,

@@ -263,8 +263,29 @@ chmod 750 "$DATA_DIR"
 chmod 700 "$DATA_DIR/data"
 chmod 750 "$DATA_DIR/projects" "$DATA_DIR/backups"
 
+# The proxy allows only the API families Compose and the panel use. It is
+# wollomatic/socket-proxy because it relays the h2c upgrade on /grpc that
+# buildx probes for: with /grpc and /session reachable, builds run in Docker's
+# own BuildKit and write straight into its image store. Behind a proxy that
+# drops the upgrade (HAProxy does), buildx falls back to a BuildKit container
+# that must send every image to Docker as a tarball, cached layers included.
+# /grpc and /session reach Docker's build service directly. That is no more
+# than this proxy already gives: creating a privileged container is root on
+# the host (docs/security.md).
+# The proxy matches each regex against the whole path. -allowfrom is open
+# because the port is published on host loopback only, and a host connection
+# reaches the container from the bridge gateway, not from 127.0.0.1. Root
+# inside the container, with every capability dropped, is what opens the
+# root-owned socket without knowing the docker group's id.
+PROXY_IMAGE=ghcr.io/wollomatic/socket-proxy:1.14.0
+PROXY_ALLOW='/(v[0-9.]+/)?(_ping|version|info|events|system|build|grpc|session|containers|exec|images|networks|volumes)(/.*)?'
 if [ -d /etc/systemd/system ]; then
-  cat > /etc/systemd/system/windlass-docker-proxy.service <<'PROXYUNIT'
+  # Pulled before the unit changes, so a failed pull leaves a running proxy,
+  # and the panel that requires it, as they were. The unit's own daemon, not
+  # whatever DOCKER_HOST or context this shell inherited.
+  /usr/bin/docker -H unix:///var/run/docker.sock pull -q "$PROXY_IMAGE" >/dev/null \
+    || fail "could not pull $PROXY_IMAGE; the proxy was left as it was"
+  cat > /etc/systemd/system/windlass-docker-proxy.service <<PROXYUNIT
 [Unit]
 Description=Restricted Docker API proxy for Windlass
 After=docker.service
@@ -273,8 +294,8 @@ Requires=docker.service
 [Service]
 Type=simple
 ExecStartPre=-/usr/bin/docker rm -f windlass-docker-proxy
-ExecStartPre=-/usr/bin/docker pull ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
-ExecStart=/usr/bin/docker run --rm --name windlass-docker-proxy --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:2375:2375 -v /var/run/docker.sock:/var/run/docker.sock:ro -e POST=1 -e BUILD=1 -e CONTAINERS=1 -e ALLOW_START=1 -e ALLOW_STOP=1 -e ALLOW_RESTARTS=1 -e EVENTS=1 -e EXEC=1 -e IMAGES=1 -e INFO=1 -e NETWORKS=1 -e SYSTEM=1 -e VERSION=1 -e VOLUMES=1 ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
+ExecStartPre=-/usr/bin/docker pull $PROXY_IMAGE
+ExecStart=/usr/bin/docker run --rm --name windlass-docker-proxy --cap-drop=ALL --security-opt=no-new-privileges --user 0:0 -p 127.0.0.1:2375:2375 -v /var/run/docker.sock:/var/run/docker.sock:ro $PROXY_IMAGE -listenip=0.0.0.0 -allowfrom=0.0.0.0/0 -allowHEAD=$PROXY_ALLOW -allowGET=$PROXY_ALLOW -allowPOST=$PROXY_ALLOW -allowPUT=$PROXY_ALLOW -allowDELETE=$PROXY_ALLOW
 ExecStartPost=/bin/sh -c 'timeout 90 sh -c "until /usr/bin/docker -H tcp://127.0.0.1:2375 version >/dev/null 2>&1; do sleep 1; done"'
 ExecStop=-/usr/bin/docker stop -t 10 windlass-docker-proxy
 Restart=always
@@ -348,7 +369,9 @@ UNIT
   rm -f "$DATA_DIR/data/update/windlass.next"
   if [ -f "$BIN.previous" ]; then chown root:root "$BIN.previous" && chmod 0755 "$BIN.previous"; fi
   systemctl daemon-reload
-  systemctl enable --now windlass-docker-proxy
+  systemctl enable windlass-docker-proxy
+  # Restart rather than start, so a rerun puts a changed proxy unit into effect.
+  systemctl restart windlass-docker-proxy
   systemctl enable --now windlass
   if [ "$UPGRADE" = "1" ]; then
     systemctl restart windlass
